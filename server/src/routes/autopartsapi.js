@@ -1,0 +1,16 @@
+const express=require('express');
+const rateLimit=require('express-rate-limit');
+const {authenticateCustomer}=require('../middleware/customerAuth');
+const router=express.Router();
+const vinLimit=rateLimit({windowMs:15*60_000,limit:30,standardHeaders:true,legacyHeaders:false});
+const catalogLimit=rateLimit({windowMs:15*60_000,limit:180,standardHeaders:true,legacyHeaders:false});
+const cache=new Map();
+function cfg(){return{enabled:String(process.env.AUTOPARTSAPI_ENABLED||'').toLowerCase()==='true',base:String(process.env.AUTOPARTSAPI_BASE_URL||'https://auto-parts-catalog.apiprofile.com').replace(/\/+$/,''),key:String(process.env.AUTOPARTSAPI_KEY||''),typeId:Number(process.env.AUTOPARTSAPI_TYPE_ID||1),langId:Number(process.env.AUTOPARTSAPI_LANG_ID||4),timeout:Number(process.env.AUTOPARTSAPI_TIMEOUT_MS||15000)}}
+function vin(v){v=String(v||'').trim().toUpperCase().replace(/\s+/g,'');if(!/^[A-HJ-NPR-Z0-9]{17}$/.test(v)){const e=new Error('VIN має містити 17 символів без I, O, Q');e.status=400;throw e}return v}
+async function get(path,ttl=1800000){const c=cfg();if(!c.enabled){const e=new Error('AutoPartsAPI вимкнено');e.status=503;throw e}if(!c.key){const e=new Error('Не задано AUTOPARTSAPI_KEY');e.status=503;throw e}const k=path,h=cache.get(k);if(h&&h.until>Date.now())return h.data;const r=await fetch(c.base+path,{headers:{Accept:'application/json','x-apiprofile-key':c.key},signal:AbortSignal.timeout(c.timeout)});const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch{d={raw:t}}if(!r.ok){const e=new Error(d.error||d.message||('AutoPartsAPI HTTP '+r.status));e.status=r.status;throw e}cache.set(k,{until:Date.now()+ttl,data:d});if(cache.size>1000){const first=cache.keys().next().value;if(first)cache.delete(first)}return d}
+router.get('/status',(req,res)=>{const c=cfg();res.json({ok:true,enabled:c.enabled,keyConfigured:!!c.key,ready:c.enabled&&!!c.key,typeId:c.typeId,langId:c.langId,cacheEntries:cache.size})});
+router.get('/vin/:vin',vinLimit,async(req,res,next)=>{try{const c=cfg(),v=vin(req.params.vin);res.json(await get(`/api/v2/vin/tecdoc-vin-check/${encodeURIComponent(v)}`,86400000))}catch(e){next(e)}});
+router.get('/vehicles/:vehicleId/categories',authenticateCustomer,catalogLimit,async(req,res,next)=>{try{const c=cfg(),id=Number(req.params.vehicleId);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Некоректний vehicleId'});res.json(await get(`/api/v2/category/type-id/${c.typeId}/products-groups-variant-1/${id}/lang-id/${c.langId}`))}catch(e){next(e)}});
+router.get('/vehicles/:vehicleId/categories/:categoryId/articles',authenticateCustomer,catalogLimit,async(req,res,next)=>{try{const c=cfg(),v=Number(req.params.vehicleId),cat=Number(req.params.categoryId);if(!Number.isInteger(v)||v<=0||!Number.isInteger(cat)||cat<=0)return res.status(400).json({error:'Некоректний vehicleId/categoryId'});res.json(await get(`/api/v2/articles/list/type-id/${c.typeId}/vehicle-id/${v}/category-id/${cat}/lang-id/${c.langId}`))}catch(e){next(e)}});
+router.get('/articles/:articleId',authenticateCustomer,catalogLimit,async(req,res,next)=>{try{const c=cfg(),id=Number(req.params.articleId);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Некоректний articleId'});res.json(await get(`/api/v2/articles/details/article-id/${id}/lang-id/${c.langId}`))}catch(e){next(e)}});
+module.exports=router;

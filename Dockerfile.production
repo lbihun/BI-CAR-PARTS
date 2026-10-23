@@ -1,0 +1,18 @@
+FROM node:20-alpine AS deps
+WORKDIR /app/server
+COPY server/package*.json ./
+RUN npm install --omit=dev && npm cache clean --force
+
+FROM node:20-alpine
+ENV NODE_ENV=production
+WORKDIR /app
+RUN apk add --no-cache su-exec && addgroup -S bicar && adduser -S -G bicar bicar
+COPY --from=deps /app/server/node_modules ./server/node_modules
+COPY server ./server
+COPY frontend ./frontend
+COPY docker-entrypoint.production.sh /usr/local/bin/bicar-entrypoint
+RUN chmod +x /usr/local/bin/bicar-entrypoint && mkdir -p /app/uploads && chown -R bicar:bicar /app
+WORKDIR /app/server
+EXPOSE 3000
+ENTRYPOINT ["/usr/local/bin/bicar-entrypoint"]
+CMD ["node","src/server.js"]

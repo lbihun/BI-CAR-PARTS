@@ -1,0 +1,10 @@
+const express=require('express');
+const {query}=require('../db');
+const {authenticateCustomer}=require('../middleware/customerAuth');
+const router=express.Router();
+router.use(authenticateCustomer);
+router.get('/cars',async(req,res,next)=>{try{const r=await query('SELECT id,vin,make,model,year,engine,fuel,notes FROM customer_cars WHERE customer_id=$1 ORDER BY id DESC',[req.customer.customerId]);res.json({items:r.rows})}catch(e){next(e)}});
+router.post('/cars',async(req,res,next)=>{try{const b=req.body||{},vin=String(b.vin||'').trim().toUpperCase();if(vin&&!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin))return res.status(400).json({error:'Некоректний VIN'});if(!String(b.make||'').trim()||!String(b.model||'').trim())return res.status(400).json({error:'Марка і модель обов’язкові'});const r=await query('INSERT INTO customer_cars(customer_id,vin,make,model,year,engine,fuel,notes) VALUES($1,NULLIF($2,\'\'),$3,$4,$5,$6,$7,$8) RETURNING id,vin,make,model,year,engine,fuel,notes',[req.customer.customerId,vin,String(b.make).slice(0,120),String(b.model).slice(0,120),Number(b.year)||null,String(b.engine||'').slice(0,120),String(b.fuel||'').slice(0,80),String(b.notes||'').slice(0,500)]);res.status(201).json(r.rows[0])}catch(e){next(e)}});
+router.delete('/cars/:id',async(req,res,next)=>{try{const r=await query('DELETE FROM customer_cars WHERE id=$1 AND customer_id=$2 RETURNING id',[req.params.id,req.customer.customerId]);if(!r.rows[0])return res.status(404).json({error:'Автомобіль не знайдено'});res.json({ok:true})}catch(e){next(e)}});
+router.get('/orders',async(req,res,next)=>{try{const r=await query(`SELECT o.*,COALESCE((SELECT json_agg(json_build_object('id',oi.id,'productId',oi.product_id,'name',oi.name,'sku',oi.sku,'qty',oi.qty,'price',oi.unit_price,'total',oi.total) ORDER BY oi.id) FROM order_items oi WHERE oi.order_id=o.id),'[]'::json) items FROM orders o WHERE o.customer_id=$1 ORDER BY o.created_at DESC LIMIT 300`,[req.customer.customerId]);res.json({items:r.rows})}catch(e){next(e)}});
+module.exports=router;

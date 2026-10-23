@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bicar_parts}
+      POSTGRES_USER: ${POSTGRES_USER:-bicar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bicar_local_dev}
+    volumes:
+      - bicar_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bicar} -d ${POSTGRES_DB:-bicar_parts}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: ./server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-bicar}:${POSTGRES_PASSWORD:-bicar_local_dev}@db:5432/${POSTGRES_DB:-bicar_parts}
+      PORT: 3000
+      UPLOAD_DIR: /app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app/frontend:ro
+      - bicar_uploads:/app/uploads
+
+volumes:
+  bicar_pgdata:
+  bicar_uploads:
